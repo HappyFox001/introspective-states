@@ -84,7 +84,8 @@ class ConceptVectorBuilder:
         else:
             raise ValueError(f"Unknown token_position: {token_position}")
 
-        return activation.cpu()
+        # Convert to float32 for numpy compatibility (bfloat16 not supported)
+        return activation.cpu().float()
 
     def build_contrastive_vector(
         self,
@@ -117,11 +118,11 @@ class ConceptVectorBuilder:
                                            total=n_pairs,
                                            desc=f"Layer {layer_idx}",
                                            leave=False):
-            # Get activations
+            # Get activations (already in float32 from get_activation)
             pos_act = self.get_activation(pos_prompt, layer_idx, token_position='last')
             neg_act = self.get_activation(neg_prompt, layer_idx, token_position='last')
 
-            # Compute difference
+            # Compute difference and convert to numpy
             delta = (pos_act - neg_act).numpy()
             deltas.append(delta)
 
