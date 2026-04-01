@@ -1,0 +1,30 @@
+# Core dependencies
+torch>=2.0.0
+transformers>=4.35.0
+accelerate>=0.24.0
+datasets>=2.14.0
+
+# Scientific computing
+numpy>=1.24.0
+scipy>=1.11.0
+scikit-learn>=1.3.0
+
+# Data processing
+pandas>=2.0.0
+tqdm>=4.65.0
+
+# Visualization
+matplotlib>=3.7.0
+seaborn>=0.12.0
+
+# Configuration
+pyyaml>=6.0
+jsonlines>=4.0.0
+
+# Statistics
+statsmodels>=0.14.0
+pingouin>=0.5.3
+
+# Optional: for better LLM judge
+openai>=1.0.0  # if using OpenAI API
+anthropic>=0.7.0  # if using Claude API

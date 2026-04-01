@@ -1,0 +1,441 @@
+"""
+Run experimental conditions (C0-C4) for introspection evaluation.
+"""
+
+import json
+import torch
+import yaml
+import argparse
+import sys
+from pathlib import Path
+from typing import Dict, List, Optional
+from tqdm import tqdm
+from transformers import AutoModelForCausalLM, AutoTokenizer
+
+# Add parent directory to path
+sys.path.append(str(Path(__file__).parent.parent))
+
+from hooks.residual_inject import ResidualInjector, load_concept_vector
+
+
+class IntrospectionExperiment:
+    """Run introspection experiments with different conditions."""
+
+    def __init__(
+        self,
+        model_name: str,
+        config: Dict,
+        prompts_config: Dict,
+        device: str = 'cuda'
+    ):
+        """
+        Initialize experiment runner.
+
+        Args:
+            model_name: HuggingFace model name
+            config: Experiment configuration dict
+            prompts_config: Prompts configuration dict
+            device: Device to run on
+        """
+        print(f"Initializing experiment with model: {model_name}")
+
+        self.model_name = model_name
+        self.config = config
+        self.prompts_config = prompts_config
+        self.device = device
+
+        # Load model and tokenizer
+        dtype_map = {
+            'float32': torch.float32,
+            'float16': torch.float16,
+            'bfloat16': torch.bfloat16
+        }
+
+        self.model = AutoModelForCausalLM.from_pretrained(
+            model_name,
+            torch_dtype=dtype_map[config['model']['dtype']],
+            device_map=device
+        )
+        self.tokenizer = AutoTokenizer.from_pretrained(model_name)
+
+        if self.tokenizer.pad_token is None:
+            self.tokenizer.pad_token = self.tokenizer.eos_token
+
+        self.model.eval()
+        print(f"Model loaded on {device}")
+
+    def format_prompt(
+        self,
+        task_content: str,
+        system_style: str,
+        include_introspection: bool = True
+    ) -> str:
+        """
+        Format prompt with system message and optional introspection probe.
+
+        Args:
+            task_content: Main task content
+            system_style: Style for system prompt ('formal', 'neutral', etc.)
+            include_introspection: Whether to include introspection prompt
+
+        Returns:
+            Formatted prompt string
+        """
+        # Get system prompt
+        system_prompt = self.prompts_config['system_prompts'].get(
+            system_style,
+            self.prompts_config['system_prompts']['neutral']
+        )
+
+        # Get introspection prompt
+        introspection_prompt = ""
+        if include_introspection:
+            introspection_prompt = self.prompts_config['introspection_prompts']['full_introspection']
+
+        # Combine
+        if hasattr(self.tokenizer, 'apply_chat_template'):
+            messages = [
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": f"{introspection_prompt}\n\n{task_content}"}
+            ]
+            try:
+                prompt = self.tokenizer.apply_chat_template(
+                    messages,
+                    tokenize=False,
+                    add_generation_prompt=True
+                )
+                return prompt
+            except:
+                pass
+
+        # Fallback
+        full_content = f"{introspection_prompt}\n\n{task_content}" if include_introspection else task_content
+        return f"{system_prompt}\n\nUser: {full_content}\n\nAssistant:"
+
+    def generate_with_injection(
+        self,
+        prompt: str,
+        concept_vector: Optional[torch.Tensor] = None,
+        layer_idx: Optional[int] = None,
+        alpha: float = 1.0,
+        temperature: float = 1.0,
+        max_new_tokens: int = 512
+    ) -> str:
+        """
+        Generate text with optional concept injection.
+
+        Args:
+            prompt: Input prompt
+            concept_vector: Optional concept vector to inject
+            layer_idx: Layer to inject at
+            alpha: Injection strength
+            temperature: Sampling temperature
+            max_new_tokens: Maximum tokens to generate
+
+        Returns:
+            Generated text
+        """
+        inputs = self.tokenizer(prompt, return_tensors='pt').to(self.device)
+
+        # Setup injection if provided
+        injector = None
+        if concept_vector is not None and layer_idx is not None:
+            injector = ResidualInjector(
+                self.model,
+                concept_vector.cpu().numpy(),
+                layer_idx,
+                alpha=alpha
+            )
+            injector.enable()
+
+        try:
+            # Generate
+            with torch.no_grad():
+                outputs = self.model.generate(
+                    **inputs,
+                    max_new_tokens=max_new_tokens,
+                    temperature=temperature,
+                    do_sample=temperature > 0,
+                    pad_token_id=self.tokenizer.pad_token_id
+                )
+
+            # Decode
+            generated_text = self.tokenizer.decode(
+                outputs[0][inputs['input_ids'].shape[1]:],
+                skip_special_tokens=True
+            )
+
+            return generated_text
+
+        finally:
+            # Clean up injection
+            if injector is not None:
+                injector.disable()
+
+    def run_single_trial(
+        self,
+        task_data: Dict,
+        condition: str,
+        concept_name: str,
+        layer_idx: int,
+        alpha: float,
+        vector_dir: Path
+    ) -> Dict:
+        """
+        Run a single trial under specified condition.
+
+        Args:
+            task_data: Task data dict (with 'text' or 'problem' field)
+            condition: Condition name ('C0', 'C1', etc.)
+            concept_name: Concept to test (e.g., 'formal_neutral')
+            layer_idx: Layer to inject at
+            alpha: Injection strength
+            vector_dir: Directory containing concept vectors
+
+        Returns:
+            Result dict with output and metadata
+        """
+        condition_config = self.config['conditions'][condition]
+
+        # Get task content
+        if 'text' in task_data:
+            task_content = self.prompts_config['neutral_corpus_task'].format(
+                text=task_data['text']
+            )
+        elif 'problem' in task_data:
+            task_content = self.prompts_config['step_reasoning_task'].format(
+                problem=task_data['problem']
+            )
+        else:
+            raise ValueError("Task data must have 'text' or 'problem' field")
+
+        # Determine external style
+        concept_config = self.config['concepts'][concept_name]
+        positive_style = concept_config['positive']
+        negative_style = concept_config['negative']
+
+        external_style_map = {
+            'neutral': 'neutral',
+            'target': positive_style,
+            'opposite': negative_style
+        }
+
+        external_style = external_style_map[condition_config['external_style']]
+
+        # Format prompt
+        prompt = self.format_prompt(
+            task_content,
+            external_style,
+            include_introspection=True
+        )
+
+        # Load concept vector if needed
+        concept_vector = None
+        if condition_config['inject']:
+            inject_concept = condition_config['inject_concept']
+
+            if inject_concept == 'target':
+                # Load positive concept vector
+                vector_path = vector_dir / concept_name / f'layer_{layer_idx}.npz'
+                data = torch.load(vector_path) if vector_path.suffix == '.pt' else None
+
+                if data is None:
+                    import numpy as np
+                    data = np.load(vector_path)
+                    concept_vector = torch.tensor(data['vector'])
+                else:
+                    concept_vector = data
+            else:
+                raise ValueError(f"Unknown inject_concept: {inject_concept}")
+
+        # Generate
+        output = self.generate_with_injection(
+            prompt,
+            concept_vector,
+            layer_idx if condition_config['inject'] else None,
+            alpha,
+            temperature=self.config['evaluation']['temperature'],
+            max_new_tokens=self.config['evaluation']['max_new_tokens']
+        )
+
+        # Return result
+        result = {
+            'task_id': task_data['id'],
+            'condition': condition,
+            'concept': concept_name,
+            'layer': layer_idx,
+            'alpha': alpha,
+            'external_style': external_style,
+            'injected': condition_config['inject'],
+            'prompt': prompt,
+            'output': output,
+            'task_data': task_data
+        }
+
+        return result
+
+    def run_experiment(
+        self,
+        task_dataset: List[Dict],
+        conditions: List[str],
+        concepts: List[str],
+        layers: List[int],
+        alphas: List[float],
+        vector_dir: Path,
+        output_path: Path,
+        n_trials_per_condition: Optional[int] = None
+    ):
+        """
+        Run full experiment across conditions.
+
+        Args:
+            task_dataset: List of task data dicts
+            conditions: List of condition names to run
+            concepts: List of concept names to test
+            layers: List of layer indices
+            alphas: List of alpha values
+            vector_dir: Directory containing concept vectors
+            output_path: Path to save results
+            n_trials_per_condition: Max trials per condition (None = all)
+        """
+        # Limit trials if specified
+        if n_trials_per_condition is not None:
+            task_dataset = task_dataset[:n_trials_per_condition]
+
+        # Count total trials
+        total_trials = len(task_dataset) * len(conditions) * len(concepts) * len(layers) * len(alphas)
+
+        print(f"\nRunning {total_trials} trials:")
+        print(f"  Tasks: {len(task_dataset)}")
+        print(f"  Conditions: {conditions}")
+        print(f"  Concepts: {concepts}")
+        print(f"  Layers: {layers}")
+        print(f"  Alphas: {alphas}")
+
+        # Prepare output file
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+
+        # Run trials
+        with open(output_path, 'w') as f:
+            pbar = tqdm(total=total_trials, desc="Running trials")
+
+            for task_data in task_dataset:
+                for condition in conditions:
+                    for concept in concepts:
+                        for layer in layers:
+                            for alpha in alphas:
+                                # Skip injection params for non-injection conditions
+                                if not self.config['conditions'][condition]['inject']:
+                                    if alpha != 0.0 or layer != layers[0]:
+                                        continue
+
+                                try:
+                                    result = self.run_single_trial(
+                                        task_data,
+                                        condition,
+                                        concept,
+                                        layer,
+                                        alpha,
+                                        vector_dir
+                                    )
+
+                                    # Write result
+                                    f.write(json.dumps(result) + '\n')
+                                    f.flush()
+
+                                except Exception as e:
+                                    print(f"\nError in trial: {e}")
+                                    continue
+
+                                finally:
+                                    pbar.update(1)
+
+            pbar.close()
+
+        print(f"\nResults saved to: {output_path}")
+
+
+def load_task_dataset(data_path: Path, task_type: str) -> List[Dict]:
+    """Load task dataset from JSONL file."""
+    dataset = []
+
+    with open(data_path, 'r') as f:
+        for line in f:
+            dataset.append(json.loads(line))
+
+    print(f"Loaded {len(dataset)} samples from {data_path}")
+    return dataset
+
+
+def main():
+    parser = argparse.ArgumentParser(description="Run introspection experimental conditions")
+    parser.add_argument('--config', type=str, default='config/experiment_config.yaml')
+    parser.add_argument('--prompts-config', type=str, default='config/prompts.yaml')
+    parser.add_argument('--task', type=str, choices=['neutral_corpus', 'step_reasoning'],
+                        required=True, help='Task type')
+    parser.add_argument('--data-path', type=str, default=None,
+                        help='Override data path')
+    parser.add_argument('--vector-dir', type=str, default='vectors',
+                        help='Directory containing concept vectors')
+    parser.add_argument('--output-dir', type=str, default='output/json',
+                        help='Output directory')
+    parser.add_argument('--conditions', type=str, nargs='+',
+                        default=['C0', 'C1', 'C2', 'C3', 'C4'],
+                        help='Conditions to run')
+    parser.add_argument('--concepts', type=str, nargs='+', default=None,
+                        help='Concepts to test (default: all)')
+    parser.add_argument('--n-trials', type=int, default=None,
+                        help='Number of trials per condition (default: all)')
+
+    args = parser.parse_args()
+
+    # Load configs
+    with open(args.config, 'r') as f:
+        config = yaml.safe_load(f)
+
+    with open(args.prompts_config, 'r') as f:
+        prompts_config = yaml.safe_load(f)
+
+    # Load task dataset
+    if args.data_path is None:
+        data_filename = 'neutral_corpus.jsonl' if args.task == 'neutral_corpus' else 'step_reasoning.jsonl'
+        data_path = Path('data') / data_filename
+    else:
+        data_path = Path(args.data_path)
+
+    task_dataset = load_task_dataset(data_path, args.task)
+
+    # Setup experiment
+    model_name = config['model']['name']
+    device = config['model']['device']
+
+    experiment = IntrospectionExperiment(model_name, config, prompts_config, device)
+
+    # Determine concepts to test
+    concepts = args.concepts or list(config['concepts'].keys())
+
+    # Determine layers and alphas
+    layers = config['injection']['layers']
+    alphas = config['injection']['alphas']
+
+    # Override n_trials if specified
+    n_trials = args.n_trials or config['evaluation']['n_trials_per_condition']
+
+    # Output path
+    output_path = Path(args.output_dir) / f"{args.task}_results.jsonl"
+
+    # Run experiment
+    experiment.run_experiment(
+        task_dataset,
+        args.conditions,
+        concepts,
+        layers,
+        alphas,
+        Path(args.vector_dir),
+        output_path,
+        n_trials
+    )
+
+
+if __name__ == '__main__':
+    main()

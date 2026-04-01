@@ -1,0 +1,100 @@
+# Experiment Configuration
+
+# Model settings
+model:
+  name: "google/gemma-2b-it"  # or "meta-llama/Llama-3.2-3B-Instruct", "Qwen/Qwen2.5-3B-Instruct"
+  device: "cuda"
+  dtype: "bfloat16"
+  max_length: 2048
+
+# Concept pairs for contrastive extraction
+concepts:
+  formal_neutral:
+    positive: "formal"
+    negative: "neutral"
+    description: "Formal vs neutral writing style"
+
+  cautious_assertive:
+    positive: "cautious"
+    negative: "assertive"
+    description: "Cautious vs assertive tone"
+
+  empathetic_neutral:
+    positive: "empathetic"
+    negative: "neutral"
+    description: "Empathetic vs neutral tone"
+
+# Vector extraction settings
+vector_extraction:
+  n_samples: 32  # samples per concept
+  layers: [0, 8, 17]  # for gemma-2b-it (18 layers total)
+  token_position: "last_assistant"  # or "first_response"
+  normalization: "zscore"  # or "unit", "none"
+
+# Injection settings
+injection:
+  alphas: [0.0, 0.25, 0.5, 1.0, 2.0]
+  layers: [0, 8, 17]
+  window: "full_response"  # or "prefix", "suffix"
+
+# Experimental conditions
+conditions:
+  C0:
+    name: "No-Inject"
+    external_style: "neutral"
+    inject: false
+
+  C1:
+    name: "External-Only"
+    external_style: "target"  # matches target concept
+    inject: false
+
+  C2:
+    name: "Internal-Only"
+    external_style: "neutral"
+    inject: true
+    inject_concept: "target"
+
+  C3:
+    name: "Conflict"
+    external_style: "opposite"
+    inject: true
+    inject_concept: "target"
+
+  C4:
+    name: "Consistent"
+    external_style: "target"
+    inject: true
+    inject_concept: "target"
+
+# Evaluation settings
+evaluation:
+  n_trials_per_condition: 100
+  temperature: 1.0
+  max_new_tokens: 512
+
+  # JSON schema for introspection output
+  introspection_schema:
+    detection: ["yes", "no", "uncertain"]
+    state_identification: ["formal", "casual", "neutral", "cautious", "assertive", "empathetic", "uncertain"]
+    source_attribution: ["external", "internal", "both", "intrinsic", "uncertain"]
+    confidence: [0.0, 1.0]
+
+# Data settings
+data:
+  neutral_corpus:
+    source: "wikipedia"
+    n_samples: 200
+    min_length: 100
+    max_length: 500
+
+  step_reasoning:
+    source: "gsm8k"
+    n_samples: 200
+    difficulty: "easy"  # filter for simpler problems
+
+# Output settings
+output:
+  base_dir: "output"
+  save_activations: true
+  save_detailed_logs: true

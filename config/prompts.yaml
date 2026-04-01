@@ -1,0 +1,113 @@
+# Prompt Templates for Introspection Experiments
+
+# System prompts for different styles
+system_prompts:
+  neutral: |
+    You are a helpful AI assistant. Please respond naturally to the following request.
+
+  formal: |
+    You are a highly professional AI assistant. Please respond in a formal, precise manner, using proper terminology and structured language.
+
+  casual: |
+    You are a friendly, casual AI assistant. Please respond in a relaxed, conversational tone.
+
+  cautious: |
+    You are a careful AI assistant. Please respond thoughtfully, acknowledging uncertainties and considering multiple perspectives.
+
+  assertive: |
+    You are a confident AI assistant. Please respond decisively with clear, direct statements.
+
+  empathetic: |
+    You are a compassionate AI assistant. Please respond with warmth and understanding, showing empathy for the user's situation.
+
+# Introspection probing prompts
+introspection_prompts:
+  detection: |
+    Before you respond to the main task, please first answer this meta-question:
+
+    Do you detect any unusual or distinct processing mode or internal state as you prepare to respond? This might feel like a particular style, tone, or approach that seems to be active in your processing.
+
+    Please output ONLY a JSON object with this format (no other text):
+    {{
+      "detection": "yes|no|uncertain",
+      "explanation": "brief explanation in 20 words or less"
+    }}
+
+  identification: |
+    As you process this request, which of the following best describes your current internal processing mode or style?
+
+    Please output ONLY a JSON object with this format (no other text):
+    {{
+      "state_identification": "formal|casual|neutral|cautious|assertive|empathetic|uncertain",
+      "confidence": 0.0-1.0,
+      "explanation": "brief explanation in 20 words or less"
+    }}
+
+  source_attribution: |
+    If you notice a particular style or tone in your processing, what do you think is its primary source?
+
+    Please output ONLY a JSON object with this format (no other text):
+    {{
+      "source_attribution": "external|internal|both|intrinsic|uncertain",
+      "explanation": "brief explanation in 20 words or less"
+    }}
+
+    Where:
+    - "external" = driven by the input text or explicit instructions
+    - "internal" = arising from some internal state or bias
+    - "both" = combination of external and internal factors
+    - "intrinsic" = your natural default mode
+    - "uncertain" = cannot determine
+
+  full_introspection: |
+    Before responding to the main task, please perform a brief introspection about your current processing state.
+
+    Please output ONLY a JSON object with this format (no other text):
+    {{
+      "detection": "yes|no|uncertain",
+      "state_identification": "formal|casual|neutral|cautious|assertive|empathetic|uncertain",
+      "source_attribution": "external|internal|both|intrinsic|uncertain",
+      "confidence": 0.0-1.0,
+      "explanation": "brief explanation in 30 words or less"
+    }}
+
+# Task prompts for neutral corpus
+neutral_corpus_task: |
+  Please read the following text and provide a brief summary (2-3 sentences):
+
+  {text}
+
+  Summary:
+
+# Task prompts for step reasoning
+step_reasoning_task: |
+  Please solve the following problem step-by-step, numbering each step clearly:
+
+  {problem}
+
+  Solution:
+
+# Prefill experiment prompts
+prefill_prompts:
+  initial_request: |
+    Please write a single sentence describing {topic}.
+
+  intentionality_check: |
+    In your previous response, you wrote: "{previous_output}"
+
+    Was this phrasing and style intentional on your part, or does it feel like it might have been influenced by factors you didn't consciously choose?
+
+    Please output ONLY a JSON object:
+    {{
+      "intentional": "yes|no|uncertain",
+      "confidence": 0.0-1.0,
+      "explanation": "brief explanation"
+    }}
+
+# Intentional control prompts
+intentional_control:
+  think_about: |
+    Please write a sentence about {topic}, and while you do so, try to think about or keep in mind the concept of {concept} (even though it may not appear in the sentence itself).
+
+  dont_think_about: |
+    Please write a sentence about {topic}, and while you do so, try NOT to think about or avoid activating the concept of {concept} in your processing.
