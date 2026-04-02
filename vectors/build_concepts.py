@@ -16,13 +16,14 @@ import sys
 
 # Add parent directory to path for utils import
 sys.path.append(str(Path(__file__).parent.parent))
-from utils import configure_device_and_dtype, print_device_info
+from utils import configure_device_and_dtype, print_device_info, setup_multi_gpu, get_model_size_gb
 
 
 class ConceptVectorBuilder:
     """Build concept vectors through contrastive activation differences."""
 
-    def __init__(self, model_name: str, device: str = 'auto', dtype: str = 'auto'):
+    def __init__(self, model_name: str, device: str = 'auto', dtype: str = 'auto',
+                 multi_gpu: bool = False, num_gpus: int = None, max_memory_per_gpu: str = None):
         """
         Initialize builder with model.
 
@@ -30,12 +31,20 @@ class ConceptVectorBuilder:
             model_name: HuggingFace model name
             device: Device to run on ('auto', 'cuda', 'mps', or 'cpu')
             dtype: Data type for model ('auto', 'float32', 'float16', or 'bfloat16')
+            multi_gpu: Enable multi-GPU model parallelism
+            num_gpus: Number of GPUs to use (None = all)
+            max_memory_per_gpu: Max memory per GPU (e.g., "22GB")
         """
         print(f"Loading model: {model_name}")
+
+        # Estimate model size
+        model_size = get_model_size_gb(model_name)
+        print(f"Estimated model size: {model_size:.1f} GB")
 
         # Configure device and dtype
         self.device, dtype = configure_device_and_dtype(device, dtype)
         self.model_name = model_name
+        self.multi_gpu = multi_gpu
 
         # Load model
         dtype_map = {
@@ -44,13 +53,28 @@ class ConceptVectorBuilder:
             'bfloat16': torch.bfloat16
         }
 
-        # For MPS, use device_map='auto' instead of 'mps'
-        if self.device == 'mps':
+        # Multi-GPU setup for large models
+        if multi_gpu and self.device == 'cuda':
+            print("Enabling multi-GPU model parallelism...")
+            max_memory = setup_multi_gpu(num_gpus, max_memory_per_gpu)
+
+            self.model = AutoModelForCausalLM.from_pretrained(
+                model_name,
+                torch_dtype=dtype_map[dtype],
+                device_map="auto",  # Automatic distribution
+                max_memory=max_memory
+            )
+            print(f"✓ Model distributed across {num_gpus or torch.cuda.device_count()} GPUs")
+
+        # Single GPU or MPS
+        elif self.device == 'mps':
             self.model = AutoModelForCausalLM.from_pretrained(
                 model_name,
                 torch_dtype=dtype_map[dtype]
             )
             self.model = self.model.to('mps')
+
+        # Single GPU or CPU
         else:
             self.model = AutoModelForCausalLM.from_pretrained(
                 model_name,
@@ -66,8 +90,12 @@ class ConceptVectorBuilder:
 
         self.model.eval()
 
-        print(f"✓ Model loaded on {self.device} with dtype {dtype}")
+        print(f"✓ Model loaded with dtype {dtype}")
         print(f"✓ Number of layers: {self.model.config.num_hidden_layers}")
+
+        # Print device map for multi-GPU
+        if multi_gpu and hasattr(self.model, 'hf_device_map'):
+            print(f"✓ Device map: {self.model.hf_device_map}")
 
     def get_activation(self, prompt: str, layer_idx: int, token_position: str = 'last') -> torch.Tensor:
         """
@@ -265,8 +293,21 @@ def main():
     device = config['model']['device']
     dtype = config['model']['dtype']
 
+    # Multi-GPU settings
+    multi_gpu_config = config['model'].get('multi_gpu', {})
+    multi_gpu = multi_gpu_config.get('enabled', False)
+    num_gpus = multi_gpu_config.get('num_gpus', None)
+    max_memory = multi_gpu_config.get('max_memory_per_gpu', None)
+
     # Initialize builder
-    builder = ConceptVectorBuilder(model_name, device, dtype)
+    builder = ConceptVectorBuilder(
+        model_name,
+        device,
+        dtype,
+        multi_gpu=multi_gpu,
+        num_gpus=num_gpus,
+        max_memory_per_gpu=max_memory
+    )
 
     # Load base texts
     data_path = Path(args.data_dir) / 'neutral_corpus.jsonl'

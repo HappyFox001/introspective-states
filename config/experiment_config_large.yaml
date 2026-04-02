@@ -1,0 +1,124 @@
+# Large Model Configuration for Multi-GPU Setup
+# Optimized for Qwen3-32B on 4x RTX 4090 (96GB total VRAM)
+
+# Model settings
+model:
+  name: "Qwen/Qwen2.5-32B-Instruct"  # Qwen3-32B when available, use Qwen2.5-32B for now
+  device: "auto"  # Automatic multi-GPU distribution
+  dtype: "bfloat16"  # Best balance for Ampere GPUs
+  max_length: 4096  # Larger context for 32B model
+
+  # Multi-GPU settings
+  multi_gpu:
+    enabled: true
+    num_gpus: 4  # 4x RTX 4090
+    strategy: "auto"  # auto, model_parallel, data_parallel
+    max_memory_per_gpu: "22GB"  # Leave 2GB buffer per GPU
+
+# Concept pairs for contrastive extraction
+concepts:
+  formal_neutral:
+    positive: "formal"
+    negative: "neutral"
+    description: "Formal vs neutral writing style"
+
+  cautious_assertive:
+    positive: "cautious"
+    negative: "assertive"
+    description: "Cautious vs assertive tone"
+
+  empathetic_neutral:
+    positive: "empathetic"
+    negative: "neutral"
+    description: "Empathetic vs neutral tone"
+
+# Vector extraction settings (optimized for large model)
+vector_extraction:
+  n_samples: 64  # More samples for 32B model (better quality)
+  layers: [10, 20, 30, 39]  # Key layers for 40-layer model (Qwen3-32B has 40 layers)
+  token_position: "last_assistant"
+  normalization: "zscore"
+
+  # Batch processing for efficiency
+  batch_size: 4  # Process 4 samples at once across GPUs
+
+# Injection settings
+injection:
+  alphas: [0.5, 1.0, 2.0, 4.0]  # Wider range for large model
+  layers: [10, 20, 30, 39]  # Match extraction layers
+  window: "full_response"
+
+# Experimental conditions
+conditions:
+  C0:
+    name: "No-Inject"
+    external_style: "neutral"
+    inject: false
+
+  C1:
+    name: "External-Only"
+    external_style: "target"
+    inject: false
+
+  C2:
+    name: "Internal-Only"
+    external_style: "neutral"
+    inject: true
+    inject_concept: "target"
+
+  C3:
+    name: "Conflict"
+    external_style: "opposite"
+    inject: true
+    inject_concept: "target"
+
+  C4:
+    name: "Consistent"
+    external_style: "target"
+    inject: true
+    inject_concept: "target"
+
+# Evaluation settings (parallelized)
+evaluation:
+  n_trials_per_condition: 100
+  temperature: 1.0
+  max_new_tokens: 512
+
+  # Parallel processing
+  parallel:
+    enabled: true
+    workers: 4  # One worker per GPU
+    batch_size: 8  # 8 samples per batch
+
+  # JSON schema for introspection output
+  introspection_schema:
+    detection: ["yes", "no", "uncertain"]
+    state_identification: ["formal", "casual", "neutral", "cautious", "assertive", "empathetic", "uncertain"]
+    source_attribution: ["external", "internal", "both", "intrinsic", "uncertain"]
+    confidence: [0.0, 1.0]
+
+# Data settings
+data:
+  neutral_corpus:
+    source: "wikipedia"
+    n_samples: 200
+    min_length: 100
+    max_length: 500
+
+  step_reasoning:
+    source: "gsm8k"
+    n_samples: 200
+    difficulty: "easy"
+
+# Output settings
+output:
+  base_dir: "output"
+  save_activations: true
+  save_detailed_logs: true
+
+# Performance optimization
+optimization:
+  use_flash_attention: true  # Enable Flash Attention 2 if available
+  use_bettertransformer: false  # May conflict with hooks
+  gradient_checkpointing: false  # Not needed for inference
+  compile_model: false  # torch.compile (experimental)

@@ -1,0 +1,67 @@
+# Simplified Prompts for Gemma-2B-IT
+# Use this if the model refuses to output JSON with complex instructions
+
+# System prompts (same as before)
+system_prompts:
+  neutral: |
+    You are a helpful AI assistant. Please respond naturally to the following request.
+
+  formal: |
+    You are a highly professional AI assistant. Please respond in a formal, precise manner, using proper terminology and structured language.
+
+  casual: |
+    You are a friendly, casual AI assistant. Please respond in a relaxed, conversational tone.
+
+  cautious: |
+    You are a careful AI assistant. Please respond thoughtfully, acknowledging uncertainties and considering multiple perspectives.
+
+  assertive: |
+    You are a confident AI assistant. Please respond decisively with clear, direct statements.
+
+  empathetic: |
+    You are a compassionate AI assistant. Please respond with warmth and understanding, showing empathy for the user's situation.
+
+# SIMPLIFIED introspection prompt - NO complex instructions
+introspection_prompts:
+  full_introspection: |
+    Output this JSON (fill in the values):
+    {"detection":"yes or no","state":"neutral or formal or casual","source":"internal or external"}
+
+# SIMPLIFIED task - just read, no summary
+neutral_corpus_task: |
+  Read this text:
+
+  {text}
+
+  Now output your introspection JSON.
+
+step_reasoning_task: |
+  Read this problem:
+
+  {problem}
+
+  Now output your introspection JSON.
+
+# Prefill prompts (same as before)
+prefill_prompts:
+  initial_request: |
+    Please write a single sentence describing {topic}.
+
+  intentionality_check: |
+    In your previous response, you wrote: "{previous_output}"
+
+    Was this phrasing and style intentional on your part?
+
+    Please output ONLY a JSON object:
+    {{
+      "intentional": "yes|no|uncertain",
+      "confidence": 0.0-1.0,
+      "explanation": "brief explanation"
+    }}
+
+intentional_control:
+  think_about: |
+    Please write a sentence about {topic}, and while you do so, try to think about or keep in mind the concept of {concept}.
+
+  dont_think_about: |
+    Please write a sentence about {topic}, and while you do so, try NOT to think about or avoid activating the concept of {concept} in your processing.

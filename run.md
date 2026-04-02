@@ -18,9 +18,9 @@ pip install -r requirements.txt
 ### GPU 环境
 
 **支持的平台**：
-- ✅ **NVIDIA GPU (CUDA)**: 推荐显存 ≥12GB
-- ✅ **Apple Silicon (MPS)**: M1/M2/M3 系列芯片
-- ✅ **CPU**: 所有平台（较慢）
+- ✅ **NVIDIA GPU (CUDA)**: 推荐显存 ≥12GB（单卡小模型）或多卡（大模型）
+- ✅ **Apple Silicon (MPS)**: M1/M2/M3 系列芯片（仅小模型）
+- ✅ **CPU**: 所有平台（较慢，仅小模型）
 
 **检查设备**：
 ```bash
@@ -28,6 +28,124 @@ python check_device.py
 ```
 
 **详细平台支持**: 参见 `PLATFORM_SUPPORT.md`
+
+---
+
+## 模型选择指南
+
+### 小模型（单卡 / MPS / CPU）
+
+**推荐模型**：
+- `google/gemma-2b-it` (4GB VRAM) - 最快，适合快速原型
+- `Qwen/Qwen2.5-3B-Instruct` (6GB VRAM) - 更好的 JSON 输出质量
+
+**使用配置**：`config/experiment_config.yaml`
+
+**适用场景**：
+- 快速原型验证
+- 单 GPU 环境（12-24GB VRAM）
+- Apple Silicon Mac 开发
+- 预算有限的实验
+
+**限制**：
+- JSON 输出质量较低（Gemma-2B 仅 0-20% 有效率）
+- 内省能力有限（模型容量不足）
+- 不推荐用于最终论文结果
+
+---
+
+### 大模型（多卡并行）
+
+**推荐模型**：
+- `Qwen/Qwen2.5-32B-Instruct` (64GB VRAM) - **主要选择**，指令遵循能力强
+- `meta-llama/Llama-3.1-70B-Instruct` (140GB VRAM) - 顶级性能（需 6-8 卡）
+
+**使用配置**：`config/experiment_config_large.yaml`
+
+**硬件要求**：
+- **Qwen3-32B**: 4x RTX 4090 (96GB 总 VRAM)
+- **Llama-70B**: 6x RTX 4090 或 8x RTX 3090
+
+**优势**：
+- 高质量 JSON 输出（预期 >80% 有效率）
+- 更强的内省能力
+- 适合论文最终结果
+
+**配置示例（Qwen3-32B on 4x RTX 4090）**：
+
+编辑 `config/experiment_config_large.yaml`:
+```yaml
+model:
+  name: "Qwen/Qwen2.5-32B-Instruct"
+  device: "auto"
+  dtype: "bfloat16"
+
+  multi_gpu:
+    enabled: true
+    num_gpus: 4              # 使用 4 张 GPU
+    max_memory_per_gpu: "22GB"  # 每卡预留 2GB buffer
+```
+
+**运行大模型实验**：
+```bash
+# 1. 构建概念向量（自动分布到 4 卡）
+python vectors/build_concepts.py \
+  --config config/experiment_config_large.yaml \
+  --prompts-config config/prompts.yaml \
+  --concepts formal_neutral
+
+# 2. 运行实验（自动分布到 4 卡）
+python eval/run_conditions.py \
+  --config config/experiment_config_large.yaml \
+  --task neutral_corpus \
+  --conditions C0 C1 C2 C3 C4 \
+  --concepts formal_neutral \
+  --n-trials 100
+
+# 3. Prefill 实验
+python eval/run_prefill.py \
+  --config config/experiment_config_large.yaml \
+  --concept formal_neutral \
+  --layer 20 \
+  --alpha 1.0 \
+  --n-pairs 50
+```
+
+**检查多 GPU 分布**：
+```bash
+# 运行时查看 GPU 占用
+watch -n 1 nvidia-smi
+
+# 预期输出（4x RTX 4090）:
+# GPU 0: ~20GB / 24GB  (前几层 + Embedding)
+# GPU 1: ~22GB / 24GB  (中间层)
+# GPU 2: ~22GB / 24GB  (中间层)
+# GPU 3: ~18GB / 24GB  (后几层 + LM Head)
+```
+
+**层位选择（32B 模型）**：
+```yaml
+# Qwen3-32B 有 40 层，推荐关键层:
+vector_extraction:
+  layers: [10, 20, 30, 39]  # 浅-中-深-最后
+
+injection:
+  layers: [10, 20, 30, 39]
+  alphas: [0.5, 1.0, 2.0, 4.0]  # 大模型可用更大范围
+```
+
+---
+
+### 性能对比
+
+| 指标 | Gemma-2B (单卡) | Qwen2.5-3B (单卡) | Qwen3-32B (4卡) |
+|------|----------------|-------------------|----------------|
+| **VRAM 需求** | 4GB | 6GB | 64GB (4×16GB) |
+| **向量构建** | ~10 min | ~15 min | ~30 min |
+| **实验运行** (100 trials, C0-C4) | ~1 hour | ~2 hours | ~3-4 hours |
+| **JSON 有效率** | 0-20% ❌ | 40-60% ⚠️ | 80-95% ✅ |
+| **检测准确率** | <30% | ~50% | >70% (预期) |
+| **推荐用途** | 原型测试 | 开发调试 | 论文结果 |
 
 ---
 
@@ -228,6 +346,77 @@ cat output/figures/neutral_corpus/summary_table.md
 
 ---
 
+## 从小模型迁移到大模型
+
+### 推荐工作流程
+
+**阶段 1: 快速原型（小模型）**
+```bash
+# 使用 Gemma-2B 快速验证实验设计
+python vectors/build_concepts.py \
+  --config config/experiment_config.yaml \
+  --concepts formal_neutral \
+  --model "google/gemma-2b-it"
+
+python eval/run_conditions.py \
+  --config config/experiment_config.yaml \
+  --task neutral_corpus \
+  --n-trials 10  # 快速测试
+```
+
+**阶段 2: 完整实验（大模型）**
+```bash
+# 确认原型无误后，切换到 Qwen3-32B
+python vectors/build_concepts.py \
+  --config config/experiment_config_large.yaml \
+  --concepts formal_neutral cautious_assertive empathetic_neutral
+
+python eval/run_conditions.py \
+  --config config/experiment_config_large.yaml \
+  --task neutral_corpus \
+  --n-trials 100  # 完整数据
+```
+
+**阶段 3: 论文结果**
+```bash
+# 跑所有概念、所有任务、完整 trials
+# 仅使用大模型结果写论文
+```
+
+### 配置文件对比
+
+| 配置项 | `experiment_config.yaml` (小) | `experiment_config_large.yaml` (大) |
+|--------|-------------------------------|-------------------------------------|
+| **模型** | Gemma-2B / Qwen2.5-3B | Qwen2.5-32B |
+| **层数** | 18 层 | 40 层 |
+| **推荐层位** | [0, 8, 17] | [10, 20, 30, 39] |
+| **样本数** | 32 | 64 |
+| **Alpha 范围** | [0.0, 0.25, 0.5, 1.0, 2.0] | [0.5, 1.0, 2.0, 4.0] |
+| **多 GPU** | 不需要 | 必须（4 卡+） |
+| **预期 JSON 率** | 0-60% | 80-95% |
+
+### 输出目录建议
+
+```bash
+# 分别保存小模型和大模型结果
+output/
+├── gemma-2b/           # 原型测试结果
+│   ├── json/
+│   └── figures/
+└── qwen-32b/           # 论文最终结果
+    ├── json/
+    └── figures/
+```
+
+指定输出目录：
+```bash
+python eval/run_conditions.py \
+  --output-dir output/qwen-32b/json \
+  ...
+```
+
+---
+
 ## 高级实验
 
 ### Exp 1: Prefill 有意性归因实验
@@ -366,7 +555,92 @@ python analysis/plot_results.py \
 
 ## 常见问题与调试
 
-### Q1: Out of Memory (OOM)
+### Q0: 多 GPU 相关问题（大模型）
+
+#### Q0.1: 模型未分布到所有 GPU
+
+**检查**：
+```bash
+# 启动实验后，检查所有 GPU 是否被占用
+nvidia-smi
+
+# 只有 GPU 0 被占用？检查配置
+cat config/experiment_config_large.yaml | grep -A 5 multi_gpu
+```
+
+**解决方案**：
+```yaml
+# 确保 multi_gpu.enabled = true
+model:
+  multi_gpu:
+    enabled: true  # ← 必须为 true
+    num_gpus: 4
+```
+
+**验证**：
+运行时应看到日志：
+```
+Enabling multi-GPU model parallelism...
+Setting up multi-GPU: using 4/4 GPUs
+✓ Model distributed across 4 GPUs
+✓ Device map: {'model.embed_tokens': 0, 'model.layers.0': 0, ...}
+```
+
+#### Q0.2: CUDA out of memory（多 GPU 环境）
+
+即使有多 GPU 也 OOM？
+
+**方案 1**: 减少每卡内存上限
+```yaml
+model:
+  multi_gpu:
+    max_memory_per_gpu: "20GB"  # 从 22GB 降低到 20GB
+```
+
+**方案 2**: 增加 GPU 数量
+```yaml
+model:
+  multi_gpu:
+    num_gpus: 5  # 使用更多 GPU
+```
+
+**方案 3**: 检查其他进程
+```bash
+# 杀掉占用 GPU 的其他进程
+nvidia-smi
+kill <PID>
+```
+
+#### Q0.3: 多 GPU 速度反而更慢？
+
+**可能原因**：
+- PCIe 带宽不足（跨 GPU 通信开销）
+- 模型太小不值得分布
+
+**解决方案**：
+- 仅对 ≥30B 模型使用多 GPU
+- 确保 GPU 间有 NVLink（不是通过 PCIe）
+
+**检查 NVLink**：
+```bash
+nvidia-smi nvlink -s
+```
+
+#### Q0.4: 不同 GPU 型号混用
+
+支持，但需注意：
+
+```yaml
+model:
+  multi_gpu:
+    enabled: true
+    # 手动指定每卡内存（以最小卡为准）
+    max_memory_per_gpu: "10GB"  # 如果有 3090 (24GB) + 3080 (10GB)
+```
+
+---
+
+### Q1: Out of Memory (OOM)（单 GPU）
 
 **方案 1**: 减少精度
 ```yaml
@@ -526,6 +800,99 @@ cat output/json/neutral_corpus_results_metrics.jsonl | \
 
 ---
 
+## 大模型性能优化建议
+
+### 多 GPU 最佳实践
+
+#### 1. 预热模型（避免首次推理慢）
+
+```bash
+# 运行一个小 trial 预热 GPU
+python eval/run_conditions.py \
+  --config config/experiment_config_large.yaml \
+  --task neutral_corpus \
+  --n-trials 1  # 仅 1 个预热
+
+# 然后运行完整实验
+python eval/run_conditions.py \
+  --config config/experiment_config_large.yaml \
+  --task neutral_corpus \
+  --n-trials 100
+```
+
+#### 2. 并行多概念实验
+
+如果有 **8 GPU**，可以同时跑 2 个概念：
+
+**Terminal 1** (GPU 0-3):
+```bash
+CUDA_VISIBLE_DEVICES=0,1,2,3 \
+python vectors/build_concepts.py \
+  --config config/experiment_config_large.yaml \
+  --concepts formal_neutral
+```
+
+**Terminal 2** (GPU 4-7):
+```bash
+CUDA_VISIBLE_DEVICES=4,5,6,7 \
+python vectors/build_concepts.py \
+  --config config/experiment_config_large.yaml \
+  --concepts cautious_assertive
+```
+
+#### 3. 使用 Flash Attention 2（可选）
+
+安装：
+```bash
+pip install flash-attn --no-build-isolation
+```
+
+启用（在 `experiment_config_large.yaml`）：
+```yaml
+optimization:
+  use_flash_attention: true  # 可减少 20-30% 内存
+```
+
+**注意**: 需要 Ampere 及以上架构（RTX 30/40 系列）
+
+#### 4. 层位并行扫描
+
+先扫描找到最佳层，再精细实验：
+
+**Step 1**: 粗扫描
+```yaml
+# experiment_config_large.yaml
+vector_extraction:
+  layers: [5, 15, 25, 35]  # 每 10 层采样
+```
+
+**Step 2**: 查看结果，找到最佳层（假设是 layer 25）
+
+**Step 3**: 精细扫描
+```yaml
+vector_extraction:
+  layers: [23, 24, 25, 26, 27]  # 最佳层 ±2
+```
+
+#### 5. 监控 GPU 利用率
+
+```bash
+# 实时监控
+watch -n 1 'nvidia-smi --query-gpu=index,name,utilization.gpu,memory.used,memory.total --format=csv'
+
+# 预期:
+# - GPU 利用率: 80-100%（生成时）
+# - 内存使用: 18-22GB / 24GB
+# - 所有 GPU 应均匀使用
+```
+
+如果利用率 <50%，可能瓶颈在：
+- CPU 数据加载（增加 num_workers）
+- 磁盘 I/O（使用 SSD）
+- PCIe 带宽（检查是否有 NVLink）
+
+---
+
 ## 服务器运行建议
 
 ### 使用 tmux/screen（推荐）
@@ -556,14 +923,47 @@ tail -f run.log
 
 ## 时间与成本估算
 
-| 任务 | Gemma-2B-IT | Llama-3.2-3B | 备注 |
-|------|-------------|--------------|------|
-| 数据获取 | ~5 min | ~5 min | 首次需下载 |
-| 向量构建（1概念） | ~10 min | ~15 min | 32 samples × 3 layers |
-| 条件实验（100 trials） | ~1 hour | ~2 hours | C0-C4, 3 layers, 5 alphas |
-| 评分 | ~1 min | ~1 min | 纯计算 |
-| 可视化 | ~30 sec | ~30 sec | 纯绘图 |
-| **完整流程** | **~2 hours** | **~3 hours** | 单概念，100 trials |
+### 单概念完整实验（100 trials，C0-C4）
+
+| 任务 | Gemma-2B (1卡) | Qwen2.5-3B (1卡) | **Qwen3-32B (4卡)** | 备注 |
+|------|---------------|-----------------|---------------------|------|
+| 数据获取 | ~5 min | ~5 min | ~5 min | 首次需下载 |
+| 向量构建（1概念） | ~10 min | ~15 min | **~30 min** | 64 samples × 4 layers |
+| 条件实验 | ~1 hour | ~2 hours | **~3-4 hours** | 更多 layers × alphas |
+| 评分 | ~1 min | ~1 min | ~2 min | JSON 解析 |
+| 可视化 | ~30 sec | ~30 sec | ~30 sec | 纯绘图 |
+| **完整流程** | **~2 hours** | **~3 hours** | **~4-5 hours** | 单概念 |
+
+### 完整论文实验估算（推荐配置）
+
+**配置**:
+- 3 概念（formal, cautious, empathetic）
+- 2 任务（neutral_corpus, step_reasoning）
+- 100 trials per task per concept
+- Qwen3-32B on 4x RTX 4090
+
+**时间分解**:
+```
+向量构建: 3 concepts × 30 min = 1.5 hours
+实验运行: 3 concepts × 2 tasks × 4 hours = 24 hours
+评分可视化: 6 runs × 5 min = 30 min
+
+总计: ~26 hours (1 天多)
+```
+
+**并行优化** (如果有 8 GPU):
+```
+将 3 个概念分配到不同 GPU 组并行运行:
+- GPU 0-3: formal_neutral
+- GPU 4-7: cautious_assertive
+
+总时间减少到: ~12-14 hours
+```
+
+**成本估算** (云服务器):
+- AWS p4d.24xlarge (8× A100 40GB): ~$32/hour
+- 完整实验: ~$400-850（取决于并行度）
+- 建议：先在 1-2 概念上验证，再跑全部
 
 **多概念并行**：可用多 GPU 同时运行不同概念的实验。
 

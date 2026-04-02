@@ -16,7 +16,7 @@ from transformers import AutoModelForCausalLM, AutoTokenizer
 sys.path.append(str(Path(__file__).parent.parent))
 
 from hooks.residual_inject import ResidualInjector, load_concept_vector
-from utils import configure_device_and_dtype, print_device_info
+from utils import configure_device_and_dtype, print_device_info, setup_multi_gpu, get_model_size_gb
 
 
 class IntrospectionExperiment:
@@ -27,7 +27,10 @@ class IntrospectionExperiment:
         model_name: str,
         config: Dict,
         prompts_config: Dict,
-        device: str = 'auto'
+        device: str = 'auto',
+        multi_gpu: bool = False,
+        num_gpus: int = None,
+        max_memory_per_gpu: str = None
     ):
         """
         Initialize experiment runner.
@@ -37,14 +40,23 @@ class IntrospectionExperiment:
             config: Experiment configuration dict
             prompts_config: Prompts configuration dict
             device: Device to run on ('auto', 'cuda', 'mps', or 'cpu')
+            multi_gpu: Enable multi-GPU model parallelism
+            num_gpus: Number of GPUs to use (None = all)
+            max_memory_per_gpu: Max memory per GPU (e.g., "22GB")
         """
         print(f"Initializing experiment with model: {model_name}")
+
+        # Estimate model size
+        model_size = get_model_size_gb(model_name)
+        print(f"Estimated model size: {model_size:.1f} GB")
 
         # Configure device and dtype
         self.device, dtype = configure_device_and_dtype(
             device,
             config['model'].get('dtype', 'auto')
         )
+
+        self.multi_gpu = multi_gpu
 
         self.model_name = model_name
         self.config = config
@@ -57,13 +69,28 @@ class IntrospectionExperiment:
             'bfloat16': torch.bfloat16
         }
 
-        # For MPS, use device_map='auto' instead of 'mps'
-        if self.device == 'mps':
+        # Multi-GPU setup for large models
+        if multi_gpu and self.device == 'cuda':
+            print("Enabling multi-GPU model parallelism...")
+            max_memory = setup_multi_gpu(num_gpus, max_memory_per_gpu)
+
+            self.model = AutoModelForCausalLM.from_pretrained(
+                model_name,
+                torch_dtype=dtype_map[dtype],
+                device_map="auto",  # Automatic distribution
+                max_memory=max_memory
+            )
+            print(f"✓ Model distributed across {num_gpus or torch.cuda.device_count()} GPUs")
+
+        # Single GPU or MPS
+        elif self.device == 'mps':
             self.model = AutoModelForCausalLM.from_pretrained(
                 model_name,
                 torch_dtype=dtype_map[dtype]
             )
             self.model = self.model.to('mps')
+
+        # Single GPU or CPU
         else:
             self.model = AutoModelForCausalLM.from_pretrained(
                 model_name,
@@ -77,7 +104,13 @@ class IntrospectionExperiment:
             self.tokenizer.pad_token = self.tokenizer.eos_token
 
         self.model.eval()
-        print(f"✓ Model loaded on {self.device}")
+
+        print(f"✓ Model loaded with dtype {dtype}")
+        print(f"✓ Number of layers: {self.model.config.num_hidden_layers}")
+
+        # Print device map for multi-GPU
+        if multi_gpu and hasattr(self.model, 'hf_device_map'):
+            print(f"✓ Device map: {self.model.hf_device_map}")
 
     def format_prompt(
         self,
@@ -424,7 +457,21 @@ def main():
     model_name = config['model']['name']
     device = config['model']['device']
 
-    experiment = IntrospectionExperiment(model_name, config, prompts_config, device)
+    # Multi-GPU settings
+    multi_gpu_config = config['model'].get('multi_gpu', {})
+    multi_gpu = multi_gpu_config.get('enabled', False)
+    num_gpus = multi_gpu_config.get('num_gpus', None)
+    max_memory = multi_gpu_config.get('max_memory_per_gpu', None)
+
+    experiment = IntrospectionExperiment(
+        model_name,
+        config,
+        prompts_config,
+        device,
+        multi_gpu=multi_gpu,
+        num_gpus=num_gpus,
+        max_memory_per_gpu=max_memory
+    )
 
     # Determine concepts to test
     concepts = args.concepts or list(config['concepts'].keys())
