@@ -17,8 +17,17 @@ pip install -r requirements.txt
 
 ### GPU 环境
 
-- **推荐显存**: ≥12GB (用于 Gemma-2B-IT)
-- **更大模型**: Llama-3.2-3B / Qwen2.5-3B 需要 ≥16GB
+**支持的平台**：
+- ✅ **NVIDIA GPU (CUDA)**: 推荐显存 ≥12GB
+- ✅ **Apple Silicon (MPS)**: M1/M2/M3 系列芯片
+- ✅ **CPU**: 所有平台（较慢）
+
+**检查设备**：
+```bash
+python check_device.py
+```
+
+**详细平台支持**: 参见 `PLATFORM_SUPPORT.md`
 
 ---
 

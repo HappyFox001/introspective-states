@@ -110,6 +110,7 @@ def test_model_loading():
     try:
         import torch
         from transformers import AutoTokenizer
+        from utils import get_optimal_device
 
         # Try loading tokenizer only (lightweight test)
         model_name = "google/gemma-2b-it"
@@ -123,11 +124,17 @@ def test_model_loading():
         tokens = tokenizer(test_text, return_tensors='pt')
         print(f"  ✓ Tokenization works")
 
-        # Check CUDA availability
+        # Check device availability
+        device, device_type = get_optimal_device()
+        print(f"  ✓ Optimal device: {device_type}")
+
+        # Test device-specific features
         if torch.cuda.is_available():
             print(f"  ✓ CUDA available: {torch.cuda.get_device_name(0)}")
+        elif torch.backends.mps.is_available():
+            print(f"  ✓ MPS available (Apple Silicon GPU)")
         else:
-            print(f"  ⚠ CUDA not available (CPU only)")
+            print(f"  ⚠ No GPU acceleration (CPU only)")
 
         print("✓ Model infrastructure works\n")
         return True

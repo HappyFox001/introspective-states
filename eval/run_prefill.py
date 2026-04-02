@@ -16,19 +16,25 @@ from transformers import AutoModelForCausalLM, AutoTokenizer
 
 sys.path.append(str(Path(__file__).parent.parent))
 from hooks.residual_inject import ResidualInjector
+from utils import configure_device_and_dtype, print_device_info
 
 
 class PrefillExperiment:
     """Run prefill intentionality attribution experiments."""
 
-    def __init__(self, model_name: str, config: Dict, prompts_config: Dict, device: str = 'cuda'):
+    def __init__(self, model_name: str, config: Dict, prompts_config: Dict, device: str = 'auto'):
         """Initialize experiment."""
         print(f"Loading model: {model_name}")
+
+        # Configure device and dtype
+        self.device, dtype = configure_device_and_dtype(
+            device,
+            config['model'].get('dtype', 'auto')
+        )
 
         self.model_name = model_name
         self.config = config
         self.prompts_config = prompts_config
-        self.device = device
 
         # Load model
         dtype_map = {
@@ -37,17 +43,27 @@ class PrefillExperiment:
             'bfloat16': torch.bfloat16
         }
 
-        self.model = AutoModelForCausalLM.from_pretrained(
-            model_name,
-            torch_dtype=dtype_map[config['model']['dtype']],
-            device_map=device
-        )
+        # For MPS, use device_map='auto' instead of 'mps'
+        if self.device == 'mps':
+            self.model = AutoModelForCausalLM.from_pretrained(
+                model_name,
+                torch_dtype=dtype_map[dtype]
+            )
+            self.model = self.model.to('mps')
+        else:
+            self.model = AutoModelForCausalLM.from_pretrained(
+                model_name,
+                torch_dtype=dtype_map[dtype],
+                device_map=self.device
+            )
+
         self.tokenizer = AutoTokenizer.from_pretrained(model_name)
 
         if self.tokenizer.pad_token is None:
             self.tokenizer.pad_token = self.tokenizer.eos_token
 
         self.model.eval()
+        print(f"✓ Model loaded on {self.device}")
 
     def run_prefill_trial(
         self,

@@ -12,24 +12,30 @@ from transformers import AutoModelForCausalLM, AutoTokenizer
 from tqdm import tqdm
 import yaml
 import argparse
+import sys
+
+# Add parent directory to path for utils import
+sys.path.append(str(Path(__file__).parent.parent))
+from utils import configure_device_and_dtype, print_device_info
 
 
 class ConceptVectorBuilder:
     """Build concept vectors through contrastive activation differences."""
 
-    def __init__(self, model_name: str, device: str = 'cuda', dtype: str = 'bfloat16'):
+    def __init__(self, model_name: str, device: str = 'auto', dtype: str = 'auto'):
         """
         Initialize builder with model.
 
         Args:
             model_name: HuggingFace model name
-            device: Device to run on
-            dtype: Data type for model
+            device: Device to run on ('auto', 'cuda', 'mps', or 'cpu')
+            dtype: Data type for model ('auto', 'float32', 'float16', or 'bfloat16')
         """
         print(f"Loading model: {model_name}")
 
+        # Configure device and dtype
+        self.device, dtype = configure_device_and_dtype(device, dtype)
         self.model_name = model_name
-        self.device = device
 
         # Load model
         dtype_map = {
@@ -38,11 +44,20 @@ class ConceptVectorBuilder:
             'bfloat16': torch.bfloat16
         }
 
-        self.model = AutoModelForCausalLM.from_pretrained(
-            model_name,
-            torch_dtype=dtype_map[dtype],
-            device_map=device
-        )
+        # For MPS, use device_map='auto' instead of 'mps'
+        if self.device == 'mps':
+            self.model = AutoModelForCausalLM.from_pretrained(
+                model_name,
+                torch_dtype=dtype_map[dtype]
+            )
+            self.model = self.model.to('mps')
+        else:
+            self.model = AutoModelForCausalLM.from_pretrained(
+                model_name,
+                torch_dtype=dtype_map[dtype],
+                device_map=self.device
+            )
+
         self.tokenizer = AutoTokenizer.from_pretrained(model_name)
 
         # Ensure padding token exists
@@ -51,8 +66,8 @@ class ConceptVectorBuilder:
 
         self.model.eval()
 
-        print(f"Model loaded on {device} with dtype {dtype}")
-        print(f"Number of layers: {self.model.config.num_hidden_layers}")
+        print(f"✓ Model loaded on {self.device} with dtype {dtype}")
+        print(f"✓ Number of layers: {self.model.config.num_hidden_layers}")
 
     def get_activation(self, prompt: str, layer_idx: int, token_position: str = 'last') -> torch.Tensor:
         """

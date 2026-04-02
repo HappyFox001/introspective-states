@@ -3,8 +3,8 @@
 # Model settings
 model:
   name: "google/gemma-2b-it"  # or "meta-llama/Llama-3.2-3B-Instruct", "Qwen/Qwen2.5-3B-Instruct"
-  device: "cuda"
-  dtype: "bfloat16"
+  device: "auto"  # 'auto', 'cuda', 'mps', or 'cpu' - auto will detect best available
+  dtype: "auto"   # 'auto', 'float32', 'float16', or 'bfloat16' - auto will choose based on device
   max_length: 2048
 
 # Concept pairs for contrastive extraction

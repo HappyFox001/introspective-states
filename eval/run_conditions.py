@@ -16,6 +16,7 @@ from transformers import AutoModelForCausalLM, AutoTokenizer
 sys.path.append(str(Path(__file__).parent.parent))
 
 from hooks.residual_inject import ResidualInjector, load_concept_vector
+from utils import configure_device_and_dtype, print_device_info
 
 
 class IntrospectionExperiment:
@@ -26,7 +27,7 @@ class IntrospectionExperiment:
         model_name: str,
         config: Dict,
         prompts_config: Dict,
-        device: str = 'cuda'
+        device: str = 'auto'
     ):
         """
         Initialize experiment runner.
@@ -35,14 +36,19 @@ class IntrospectionExperiment:
             model_name: HuggingFace model name
             config: Experiment configuration dict
             prompts_config: Prompts configuration dict
-            device: Device to run on
+            device: Device to run on ('auto', 'cuda', 'mps', or 'cpu')
         """
         print(f"Initializing experiment with model: {model_name}")
+
+        # Configure device and dtype
+        self.device, dtype = configure_device_and_dtype(
+            device,
+            config['model'].get('dtype', 'auto')
+        )
 
         self.model_name = model_name
         self.config = config
         self.prompts_config = prompts_config
-        self.device = device
 
         # Load model and tokenizer
         dtype_map = {
@@ -51,18 +57,27 @@ class IntrospectionExperiment:
             'bfloat16': torch.bfloat16
         }
 
-        self.model = AutoModelForCausalLM.from_pretrained(
-            model_name,
-            torch_dtype=dtype_map[config['model']['dtype']],
-            device_map=device
-        )
+        # For MPS, use device_map='auto' instead of 'mps'
+        if self.device == 'mps':
+            self.model = AutoModelForCausalLM.from_pretrained(
+                model_name,
+                torch_dtype=dtype_map[dtype]
+            )
+            self.model = self.model.to('mps')
+        else:
+            self.model = AutoModelForCausalLM.from_pretrained(
+                model_name,
+                torch_dtype=dtype_map[dtype],
+                device_map=self.device
+            )
+
         self.tokenizer = AutoTokenizer.from_pretrained(model_name)
 
         if self.tokenizer.pad_token is None:
             self.tokenizer.pad_token = self.tokenizer.eos_token
 
         self.model.eval()
-        print(f"Model loaded on {device}")
+        print(f"✓ Model loaded on {self.device}")
 
     def format_prompt(
         self,
