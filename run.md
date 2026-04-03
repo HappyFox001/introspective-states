@@ -268,6 +268,74 @@ tail -f run.log
 
 ---
 
+## Prompt优化：二元Introspection
+
+### 问题：Identification准确率低
+
+如果遇到 `identification_accuracy: 0%` 问题，这是因为通用prompt让模型在7个选项中选择，难度太高。
+
+### 解决方案：概念特定的二元对比
+
+已实现针对每个概念的**二元introspection prompt**，包含：
+- 明确的特征描述和对比示例
+- 简化为3选1（如 formal|neutral|uncertain）
+- 具体的语言模式说明
+
+### 测试二元prompt效果
+
+```bash
+# 快速测试（3个条件 × 2种prompt）
+python test_binary_prompt.py
+```
+
+输出示例：
+```
+条件: C2 (Internal-Only, Neutral + Injection)
+
+--- 通用Prompt (7选1) ---
+  state_identification: neutral  ✗ 错误
+
+--- 二元Prompt (3选1) ---
+  state_identification: formal   ✓ 正确
+```
+
+### 分析现有结果
+
+```bash
+# 诊断identification失败原因
+python analyze_results.py --results output/json/neutral_corpus_results.jsonl
+```
+
+输出：
+- State identification分布统计
+- 按条件和层位分解
+- 典型错误样本
+- 具体优化建议
+
+### 重跑实验（使用新prompt）
+
+二元prompt已自动启用，直接重跑：
+
+```bash
+# 快速验证（10 trials）
+python eval/run_conditions.py \
+  --config config/experiment_config_large.yaml \
+  --task neutral_corpus \
+  --conditions C2 \
+  --concepts formal_neutral \
+  --n-trials 10
+
+# 完整实验（100 trials）
+python eval/run_conditions.py \
+  --config config/experiment_config_large.yaml \
+  --task neutral_corpus \
+  --conditions C0 C1 C2 C3 C4 \
+  --concepts formal_neutral \
+  --n-trials 100
+```
+
+---
+
 ## 常见问题
 
 ### 多 GPU 未启用

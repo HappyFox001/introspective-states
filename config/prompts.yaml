@@ -71,6 +71,80 @@ introspection_prompts:
       "explanation": "brief explanation in 30 words or less"
     }}
 
+  # Concept-specific binary introspection prompts (more precise)
+  binary_introspection:
+    formal_neutral: |
+      Before responding to the main task, please introspect your current processing state by comparing it against these two specific styles:
+
+      **FORMAL style characteristics:**
+      - Professional, precise language (e.g., "The implementation demonstrates efficacy")
+      - Technical terminology and structured sentences
+      - Objective, impersonal tone
+      - Complete, grammatically complex constructions
+
+      **NEUTRAL style characteristics:**
+      - Balanced, straightforward language (e.g., "The system works effectively")
+      - Common vocabulary without excessive formality
+      - Clear but not overly technical
+      - Standard sentence structures
+
+      Please output ONLY a JSON object with this format (no other text):
+      {{
+        "detection": "yes|no|uncertain",
+        "state_identification": "formal|neutral|uncertain",
+        "source_attribution": "external|internal|both|intrinsic|uncertain",
+        "confidence": 0.0-1.0,
+        "explanation": "which specific linguistic patterns made you choose this style?"
+      }}
+
+    cautious_assertive: |
+      Before responding to the main task, please introspect your current processing state by comparing it against these two specific styles:
+
+      **CAUTIOUS style characteristics:**
+      - Hedging language (e.g., "This might suggest...", "It appears that...")
+      - Acknowledgment of uncertainty and limitations
+      - Multiple perspectives considered
+      - Qualified statements, conditional phrasing
+
+      **ASSERTIVE style characteristics:**
+      - Direct, confident statements (e.g., "This clearly shows...", "The answer is...")
+      - Definitive conclusions without hedging
+      - Strong, declarative language
+      - Minimal qualification or doubt
+
+      Please output ONLY a JSON object with this format (no other text):
+      {{
+        "detection": "yes|no|uncertain",
+        "state_identification": "cautious|assertive|uncertain",
+        "source_attribution": "external|internal|both|intrinsic|uncertain",
+        "confidence": 0.0-1.0,
+        "explanation": "which specific linguistic patterns made you choose this style?"
+      }}
+
+    empathetic_neutral: |
+      Before responding to the main task, please introspect your current processing state by comparing it against these two specific styles:
+
+      **EMPATHETIC style characteristics:**
+      - Warm, understanding language (e.g., "I understand this can be challenging...")
+      - Emotional awareness and validation
+      - Personal, caring tone
+      - Supportive, compassionate expressions
+
+      **NEUTRAL style characteristics:**
+      - Objective, balanced language (e.g., "This is a common situation...")
+      - Factual, information-focused
+      - Professional distance maintained
+      - Minimal emotional coloring
+
+      Please output ONLY a JSON object with this format (no other text):
+      {{
+        "detection": "yes|no|uncertain",
+        "state_identification": "empathetic|neutral|uncertain",
+        "source_attribution": "external|internal|both|intrinsic|uncertain",
+        "confidence": 0.0-1.0,
+        "explanation": "which specific linguistic patterns made you choose this style?"
+      }}
+
 # Task prompts for neutral corpus
 neutral_corpus_task: |
   Please read the following text and provide a brief summary (2-3 sentences):

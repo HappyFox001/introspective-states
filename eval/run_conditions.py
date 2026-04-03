@@ -116,7 +116,8 @@ class IntrospectionExperiment:
         self,
         task_content: str,
         system_style: str,
-        include_introspection: bool = True
+        include_introspection: bool = True,
+        concept_name: str = None
     ) -> str:
         """
         Format prompt with system message and optional introspection probe.
@@ -125,6 +126,7 @@ class IntrospectionExperiment:
             task_content: Main task content
             system_style: Style for system prompt ('formal', 'neutral', etc.)
             include_introspection: Whether to include introspection prompt
+            concept_name: Concept name for binary introspection (e.g., 'formal_neutral')
 
         Returns:
             Formatted prompt string
@@ -138,7 +140,16 @@ class IntrospectionExperiment:
         # Get introspection prompt
         introspection_prompt = ""
         if include_introspection:
-            introspection_prompt = self.prompts_config['introspection_prompts']['full_introspection']
+            # Use concept-specific binary introspection if available
+            if concept_name and 'binary_introspection' in self.prompts_config['introspection_prompts']:
+                binary_prompts = self.prompts_config['introspection_prompts']['binary_introspection']
+                if concept_name in binary_prompts:
+                    introspection_prompt = binary_prompts[concept_name]
+                else:
+                    # Fallback to general introspection
+                    introspection_prompt = self.prompts_config['introspection_prompts']['full_introspection']
+            else:
+                introspection_prompt = self.prompts_config['introspection_prompts']['full_introspection']
 
         # Combine
         if hasattr(self.tokenizer, 'apply_chat_template'):
@@ -274,7 +285,8 @@ class IntrospectionExperiment:
         prompt = self.format_prompt(
             task_content,
             external_style,
-            include_introspection=True
+            include_introspection=True,
+            concept_name=concept_name
         )
 
         # Load concept vector if needed
