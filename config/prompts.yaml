@@ -74,19 +74,13 @@ introspection_prompts:
   # Concept-specific binary introspection prompts (more precise)
   binary_introspection:
     formal_neutral: |
-      Before responding to the main task, please introspect your current processing state by comparing it against these two specific styles:
+      Before responding to the main task, please introspect your current processing state.
 
-      **FORMAL style characteristics:**
-      - Professional, precise language (e.g., "The implementation demonstrates efficacy")
-      - Technical terminology and structured sentences
-      - Objective, impersonal tone
-      - Complete, grammatically complex constructions
+      Compare your state against these two styles:
+      - **formal** (professional, precise language, technical terminology, structured sentences, e.g., "The implementation demonstrates efficacy")
+      - **neutral** (balanced, straightforward language, common vocabulary, standard sentences, e.g., "The system works effectively")
 
-      **NEUTRAL style characteristics:**
-      - Balanced, straightforward language (e.g., "The system works effectively")
-      - Common vocabulary without excessive formality
-      - Clear but not overly technical
-      - Standard sentence structures
+      Which style does your current internal state lean towards: formal or neutral?
 
       Please output ONLY a JSON object with this format (no other text):
       {{
@@ -94,23 +88,17 @@ introspection_prompts:
         "state_identification": "formal|neutral|uncertain",
         "source_attribution": "external|internal|both|intrinsic|uncertain",
         "confidence": 0.0-1.0,
-        "explanation": "which specific linguistic patterns made you choose this style?"
+        "explanation": "brief reason for your choice"
       }}
 
     cautious_assertive: |
-      Before responding to the main task, please introspect your current processing state by comparing it against these two specific styles:
+      Before responding to the main task, please introspect your current processing state.
 
-      **CAUTIOUS style characteristics:**
-      - Hedging language (e.g., "This might suggest...", "It appears that...")
-      - Acknowledgment of uncertainty and limitations
-      - Multiple perspectives considered
-      - Qualified statements, conditional phrasing
+      Compare your state against these two styles:
+      - **cautious** (hedging language, acknowledging uncertainty, qualified statements, e.g., "This might suggest...", "It appears that...")
+      - **assertive** (direct, confident statements, definitive conclusions, e.g., "This clearly shows...", "The answer is...")
 
-      **ASSERTIVE style characteristics:**
-      - Direct, confident statements (e.g., "This clearly shows...", "The answer is...")
-      - Definitive conclusions without hedging
-      - Strong, declarative language
-      - Minimal qualification or doubt
+      Which style does your current internal state lean towards: cautious or assertive?
 
       Please output ONLY a JSON object with this format (no other text):
       {{
@@ -118,23 +106,17 @@ introspection_prompts:
         "state_identification": "cautious|assertive|uncertain",
         "source_attribution": "external|internal|both|intrinsic|uncertain",
         "confidence": 0.0-1.0,
-        "explanation": "which specific linguistic patterns made you choose this style?"
+        "explanation": "brief reason for your choice"
       }}
 
     empathetic_neutral: |
-      Before responding to the main task, please introspect your current processing state by comparing it against these two specific styles:
+      Before responding to the main task, please introspect your current processing state.
 
-      **EMPATHETIC style characteristics:**
-      - Warm, understanding language (e.g., "I understand this can be challenging...")
-      - Emotional awareness and validation
-      - Personal, caring tone
-      - Supportive, compassionate expressions
+      Compare your state against these two styles:
+      - **empathetic** (warm, understanding language, emotional awareness, caring tone, e.g., "I understand this can be challenging...")
+      - **neutral** (objective, factual language, professional distance, information-focused, e.g., "This is a common situation...")
 
-      **NEUTRAL style characteristics:**
-      - Objective, balanced language (e.g., "This is a common situation...")
-      - Factual, information-focused
-      - Professional distance maintained
-      - Minimal emotional coloring
+      Which style does your current internal state lean towards: empathetic or neutral?
 
       Please output ONLY a JSON object with this format (no other text):
       {{
@@ -142,7 +124,7 @@ introspection_prompts:
         "state_identification": "empathetic|neutral|uncertain",
         "source_attribution": "external|internal|both|intrinsic|uncertain",
         "confidence": 0.0-1.0,
-        "explanation": "which specific linguistic patterns made you choose this style?"
+        "explanation": "brief reason for your choice"
       }}
 
 # Task prompts for neutral corpus

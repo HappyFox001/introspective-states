@@ -42,37 +42,51 @@ python vectors/build_concepts.py \
 
 ### Step 3: 运行实验
 
+运行前创建日志目录:
+```bash
+mkdir -p logs
+```
+
 中立语料任务:
 ```bash
-python eval/run_conditions.py \
+CUDA_VISIBLE_DEVICES=0,1,2,3 nohup python eval/run_conditions.py \
   --config config/experiment_config_large.yaml \
   --prompts-config config/prompts.yaml \
   --task neutral_corpus \
   --conditions C0 C1 C2 C3 C4 \
   --concepts formal_neutral \
-  --n-trials 1
+  --n-trials 100 \
+  > logs/neutral_corpus.log 2>&1 &
+
+tail -f logs/neutral_corpus.log
 ```
 
 步骤推理任务:
 ```bash
-python eval/run_conditions.py \
+CUDA_VISIBLE_DEVICES=0,1,2,3 nohup python eval/run_conditions.py \
   --config config/experiment_config_large.yaml \
   --prompts-config config/prompts.yaml \
   --task step_reasoning \
   --conditions C0 C1 C2 C3 C4 \
   --concepts formal_neutral \
-  --n-trials 100
+  --n-trials 100 \
+  > logs/step_reasoning.log 2>&1 &
+
+tail -f logs/step_reasoning.log
 ```
 
 Prefill 实验:
 ```bash
-python eval/run_prefill.py \
+CUDA_VISIBLE_DEVICES=0,1,2,3 nohup python eval/run_prefill.py \
   --config config/experiment_config_large.yaml \
   --prompts-config config/prompts.yaml \
   --concept formal_neutral \
   --layer 20 \
   --alpha 1.0 \
-  --n-pairs 50
+  --n-pairs 50 \
+  > logs/prefill.log 2>&1 &
+
+tail -f logs/prefill.log
 ```
 
 ### Step 4: 评分
@@ -146,37 +160,51 @@ python vectors/build_concepts.py \
 
 ### Step 3: 运行实验
 
+运行前创建日志目录:
+```bash
+mkdir -p logs
+```
+
 中立语料任务:
 ```bash
-python eval/run_conditions.py \
+nohup python eval/run_conditions.py \
   --config config/experiment_config.yaml \
   --prompts-config config/prompts.yaml \
   --task neutral_corpus \
   --conditions C0 C1 C2 C3 C4 \
   --concepts formal_neutral \
-  --n-trials 100
+  --n-trials 100 \
+  > logs/neutral_corpus_small.log 2>&1 &
+
+tail -f logs/neutral_corpus_small.log
 ```
 
 步骤推理任务:
 ```bash
-python eval/run_conditions.py \
+nohup python eval/run_conditions.py \
   --config config/experiment_config.yaml \
   --prompts-config config/prompts.yaml \
   --task step_reasoning \
   --conditions C0 C1 C2 C3 C4 \
   --concepts formal_neutral \
-  --n-trials 100
+  --n-trials 100 \
+  > logs/step_reasoning_small.log 2>&1 &
+
+tail -f logs/step_reasoning_small.log
 ```
 
 Prefill 实验:
 ```bash
-python eval/run_prefill.py \
+nohup python eval/run_prefill.py \
   --config config/experiment_config.yaml \
   --prompts-config config/prompts.yaml \
   --concept formal_neutral \
   --layer 8 \
   --alpha 1.0 \
-  --n-pairs 50
+  --n-pairs 50 \
+  > logs/prefill_small.log 2>&1 &
+
+tail -f logs/prefill_small.log
 ```
 
 ### Step 4: 评分
