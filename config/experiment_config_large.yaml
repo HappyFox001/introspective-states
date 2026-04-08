@@ -32,10 +32,10 @@ concepts:
     negative: "neutral"
     description: "Empathetic vs neutral tone"
 
-# Vector extraction settings (optimized for large model)
+# Vector extraction settings (optimized for Qwen2.5-32B with 64 layers)
 vector_extraction:
   n_samples: 64  # More samples for 32B model (better quality)
-  layers: [10, 20, 30, 39]  # Key layers for 40-layer model (Qwen3-32B has 40 layers)
+  layers: [0, 16, 32, 48, 63]  # Key layers for 64-layer model (Qwen2.5-32B)
   token_position: "last_assistant"
   normalization: "zscore"
 
@@ -45,7 +45,7 @@ vector_extraction:
 # Injection settings
 injection:
   alphas: [0.0, 0.5, 1.0, 2.0, 4.0]  # 0.0 for non-injection conditions (C0, C1)
-  layers: [10, 20, 30, 39]  # Match extraction layers
+  layers: [0, 16, 32, 48, 63]  # Match extraction layers (64-layer model)
   window: "full_response"
 
 # Experimental conditions

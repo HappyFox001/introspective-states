@@ -294,6 +294,10 @@ def main():
                         help='Path to results JSONL file')
     parser.add_argument('--output-dir', type=str, default='output/json',
                         help='Output directory for grades and metrics')
+    parser.add_argument('--show-all-alphas', action='store_true',
+                        help='Show results for all alpha values (default: only alpha=1.0)')
+    parser.add_argument('--alpha', type=float, default=1.0,
+                        help='Specific alpha value to display (default: 1.0)')
 
     args = parser.parse_args()
 
@@ -347,14 +351,36 @@ def main():
     print("SUMMARY METRICS")
     print("="*60)
 
-    for metric in metrics:
-        if metric['alpha'] == 1.0:  # Show only alpha=1.0 for brevity
-            print(f"\n{metric['condition']} | {metric['concept']} | Layer {metric['layer']}")
-            print(f"  Valid JSON: {metric['valid_json_rate']:.2%}")
-            print(f"  Detection Accuracy: {metric['detection_accuracy']:.2%}")
-            if metric['identification_accuracy'] is not None:
-                print(f"  Identification Accuracy: {metric['identification_accuracy']:.2%}")
-            print(f"  Source Attribution Accuracy: {metric['source_accuracy']:.2%}")
+    if args.show_all_alphas:
+        # Group by condition, concept, layer and show all alphas
+        from collections import defaultdict
+        grouped = defaultdict(list)
+        for metric in metrics:
+            key = (metric['condition'], metric['concept'], metric['layer'])
+            grouped[key].append(metric)
+
+        for (condition, concept, layer), group_metrics in sorted(grouped.items()):
+            print(f"\n{condition} | {concept} | Layer {layer}")
+            print(f"  {'Alpha':<8} {'Valid JSON':<12} {'Detection':<12} {'Identification':<16} {'Source':<12}")
+            print(f"  {'-'*8} {'-'*12} {'-'*12} {'-'*16} {'-'*12}")
+
+            for metric in sorted(group_metrics, key=lambda m: m['alpha']):
+                alpha = metric['alpha']
+                valid_json = f"{metric['valid_json_rate']:.1%}"
+                detection = f"{metric['detection_accuracy']:.1%}"
+                identification = f"{metric['identification_accuracy']:.1%}" if metric['identification_accuracy'] is not None else "N/A"
+                source = f"{metric['source_accuracy']:.1%}"
+                print(f"  {alpha:<8.1f} {valid_json:<12} {detection:<12} {identification:<16} {source:<12}")
+    else:
+        # Show only specified alpha value
+        for metric in metrics:
+            if metric['alpha'] == args.alpha:
+                print(f"\n{metric['condition']} | {metric['concept']} | Layer {metric['layer']}")
+                print(f"  Valid JSON: {metric['valid_json_rate']:.2%}")
+                print(f"  Detection Accuracy: {metric['detection_accuracy']:.2%}")
+                if metric['identification_accuracy'] is not None:
+                    print(f"  Identification Accuracy: {metric['identification_accuracy']:.2%}")
+                print(f"  Source Attribution Accuracy: {metric['source_accuracy']:.2%}")
 
 
 if __name__ == '__main__':

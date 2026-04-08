@@ -14,33 +14,53 @@ pip install -r requirements.txt
 python check_device.py
 ```
 
-### 检查模型层级结构
+---
 
-**重要**: 在运行实验前，先检查你的目标模型的实际层数，确保配置文件中的层级设置正确：
+## 🔍 关键步骤：检查模型层级结构
+
+**⚠️ 重要**: 在运行任何实验前，**必须**先检查你的目标模型的实际层数！不同模型的层数差异很大：
+- Qwen2.5-32B: **64 层** (0-63)
+- Qwen2.5-7B: 28 层 (0-27)
+- Llama-3-8B: 32 层 (0-31)
+
+### 快速检查模型层数
 
 ```bash
-# 快速检查（仅加载配置）
-python scripts/check_model_layers.py --model Qwen/Qwen2.5-32B-Instruct
-
-# 完整检查（加载完整模型，需要较多内存）
-python scripts/check_model_layers.py --model Qwen/Qwen2.5-32B-Instruct --multi-gpu --num-gpus 4
+# 快速检查（仅加载配置，不加载模型权重）
+python scripts/check_model_info.py --model Qwen/Qwen2.5-32B-Instruct
 ```
 
-输出示例：
+**输出示例**：
 ```
 Number of Hidden Layers: 64
-Suggested test layers: [0, 16, 32, 48, 63]
+Recommended test layers: [0, 16, 32, 48, 63]
+
+Config Snippet for experiment_config.yaml:
+injection:
+  layers: [0, 16, 32, 48, 63]
+  alphas: [0.0, 0.5, 1.0, 2.0, 4.0]
 ```
 
-根据输出更新 `config/experiment_config_large.yaml` 中的层级设置：
+### 更新配置文件
+
+根据输出的建议层级，更新 `config/experiment_config_large.yaml`：
+
 ```yaml
+vector_extraction:
+  layers: [0, 16, 32, 48, 63]  # ✅ 使用检查脚本建议的层级
+
 injection:
-  layers: [0, 16, 32, 48, 63]  # 根据实际模型调整
+  layers: [0, 16, 32, 48, 63]  # ✅ 必须与 vector_extraction 一致
 ```
+
+**注意**：
+- `vector_extraction.layers` 和 `injection.layers` **必须完全一致**
+- 错误的层级设置会导致实验结果异常（检测率低、识别失败等）
+- 层级 0-63 对应模型的第 1-64 层
 
 ---
 
-## Part 1: 大模型实验流程 (Qwen3-32B, 4x RTX 4090)
+## Part 1: 大模型实验流程 (Qwen2.5-32B, 4x RTX 4090)
 
 ### Step 1: 数据准备
 
@@ -115,15 +135,19 @@ tail -f logs/prefill.log
 
 ### Step 4: 评分
 
+**显示所有 alpha 值的结果（推荐）：**
 ```bash
 python scoring/grade_introspection.py \
   --results output/json/neutral_corpus_results.jsonl \
-  --output-dir output/json
+  --output-dir output/json \
+  --show-all-alphas
 
 python scoring/grade_introspection.py \
   --results output/json/step_reasoning_results.jsonl \
-  --output-dir output/json
+  --output-dir output/json \
+  --show-all-alphas
 ```
+
 
 ### Step 5: 可视化
 
@@ -233,14 +257,45 @@ tail -f logs/prefill_small.log
 
 ### Step 4: 评分
 
+**显示所有 alpha 值的结果（推荐）：**
 ```bash
+python scoring/grade_introspection.py \
+  --results output/json/neutral_corpus_results.jsonl \
+  --output-dir output/json \
+  --show-all-alphas
+
+python scoring/grade_introspection.py \
+  --results output/json/step_reasoning_results.jsonl \
+  --output-dir output/json \
+  --show-all-alphas
+```
+
+**其他选项：**
+```bash
+# 只显示 alpha=1.0（默认）
 python scoring/grade_introspection.py \
   --results output/json/neutral_corpus_results.jsonl \
   --output-dir output/json
 
+# 显示特定 alpha 值
 python scoring/grade_introspection.py \
-  --results output/json/step_reasoning_results.jsonl \
-  --output-dir output/json
+  --results output/json/neutral_corpus_results.jsonl \
+  --output-dir output/json \
+  --alpha 2.0
+```
+
+**输出格式示例（--show-all-alphas）：**
+```
+C2 | formal_neutral | Layer 32
+  Alpha    Valid JSON   Detection    Identification   Source
+  -------- ------------ ------------ ---------------- ------------
+  0.5      100.0%       65.0%        35.0%            75.0%
+  1.0      100.0%       85.0%        60.0%            80.0%
+  2.0      100.0%       95.0%        75.0%            85.0%
+  4.0      100.0%       98.0%        80.0%            90.0%
+```
+
+可以观察到：**alpha 越大，识别率越高** → 验证了因果依赖性（grounding）
 ```
 
 ### Step 5: 可视化
