@@ -14,6 +14,30 @@ pip install -r requirements.txt
 python check_device.py
 ```
 
+### 检查模型层级结构
+
+**重要**: 在运行实验前，先检查你的目标模型的实际层数，确保配置文件中的层级设置正确：
+
+```bash
+# 快速检查（仅加载配置）
+python scripts/check_model_layers.py --model Qwen/Qwen2.5-32B-Instruct
+
+# 完整检查（加载完整模型，需要较多内存）
+python scripts/check_model_layers.py --model Qwen/Qwen2.5-32B-Instruct --multi-gpu --num-gpus 4
+```
+
+输出示例：
+```
+Number of Hidden Layers: 64
+Suggested test layers: [0, 16, 32, 48, 63]
+```
+
+根据输出更新 `config/experiment_config_large.yaml` 中的层级设置：
+```yaml
+injection:
+  layers: [0, 16, 32, 48, 63]  # 根据实际模型调整
+```
+
 ---
 
 ## Part 1: 大模型实验流程 (Qwen3-32B, 4x RTX 4090)

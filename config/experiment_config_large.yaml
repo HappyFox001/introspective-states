@@ -44,7 +44,7 @@ vector_extraction:
 
 # Injection settings
 injection:
-  alphas: [0.5, 1.0, 2.0, 4.0]  # Wider range for large model
+  alphas: [0.0, 0.5, 1.0, 2.0, 4.0]  # 0.0 for non-injection conditions (C0, C1)
   layers: [10, 20, 30, 39]  # Match extraction layers
   window: "full_response"
 
