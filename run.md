@@ -30,36 +30,6 @@ python check_device.py
 python scripts/check_model_info.py --model Qwen/Qwen2.5-32B-Instruct
 ```
 
-**输出示例**：
-```
-Number of Hidden Layers: 64
-Recommended test layers: [0, 16, 32, 48, 63]
-
-Config Snippet for experiment_config.yaml:
-injection:
-  layers: [0, 16, 32, 48, 63]
-  alphas: [0.0, 0.5, 1.0, 2.0, 4.0]
-```
-
-### 更新配置文件
-
-根据输出的建议层级，更新 `config/experiment_config_large.yaml`：
-
-```yaml
-vector_extraction:
-  layers: [0, 16, 32, 48, 63]  # ✅ 使用检查脚本建议的层级
-
-injection:
-  layers: [0, 16, 32, 48, 63]  # ✅ 必须与 vector_extraction 一致
-```
-
-**注意**：
-- `vector_extraction.layers` 和 `injection.layers` **必须完全一致**
-- 错误的层级设置会导致实验结果异常（检测率低、识别失败等）
-- 层级 0-63 对应模型的第 1-64 层
-
----
-
 ## Part 1: 大模型实验流程 (Qwen2.5-32B, 4x RTX 4090)
 
 ### Step 1: 数据准备
@@ -91,8 +61,10 @@ python vectors/build_concepts.py \
 mkdir -p logs
 ```
 
-中立语料任务:
+**中立语料任务（推荐使用批处理加速）：**
+
 ```bash
+# 使用批处理（batch_size=8，速度提升 6-8x）
 CUDA_VISIBLE_DEVICES=0,1,2,3 nohup python eval/run_conditions.py \
   --config config/experiment_config_large.yaml \
   --prompts-config config/prompts.yaml \
@@ -100,12 +72,23 @@ CUDA_VISIBLE_DEVICES=0,1,2,3 nohup python eval/run_conditions.py \
   --conditions C0 C1 C2 C3 C4 \
   --concepts formal_neutral \
   --n-trials 100 \
+  --batch-size 8 \
   > logs/neutral_corpus.log 2>&1 &
 
 tail -f logs/neutral_corpus.log
 ```
 
-步骤推理任务:
+**速度对比**：
+- 不使用批处理（batch-size=1）：约 24 小时
+- 使用批处理（batch-size=8）：约 **3-4 小时** ⚡
+
+**调优建议**：
+- 如果 GPU 内存充足：可尝试 `--batch-size 12` 或 16
+- 如果内存不足（OOM）：降低到 `--batch-size 4`
+- 默认值（config 中配置）：8
+
+**步骤推理任务：**
+
 ```bash
 CUDA_VISIBLE_DEVICES=0,1,2,3 nohup python eval/run_conditions.py \
   --config config/experiment_config_large.yaml \
@@ -114,6 +97,7 @@ CUDA_VISIBLE_DEVICES=0,1,2,3 nohup python eval/run_conditions.py \
   --conditions C0 C1 C2 C3 C4 \
   --concepts formal_neutral \
   --n-trials 100 \
+  --batch-size 8 \
   > logs/step_reasoning.log 2>&1 &
 
 tail -f logs/step_reasoning.log

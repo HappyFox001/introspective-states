@@ -231,6 +231,91 @@ class IntrospectionExperiment:
             if injector is not None:
                 injector.disable()
 
+    def generate_batch_with_injection(
+        self,
+        prompts: List[str],
+        concept_vector: Optional[torch.Tensor] = None,
+        layer_idx: Optional[int] = None,
+        alpha: float = 1.0,
+        temperature: float = 1.0,
+        max_new_tokens: int = 512
+    ) -> List[str]:
+        """
+        Generate text for a batch of prompts with the same injection parameters.
+
+        NOTE: All prompts in the batch share the same injection (same vector, layer, alpha).
+        For different injection parameters, call this function separately.
+
+        Args:
+            prompts: List of input prompts
+            concept_vector: Optional concept vector to inject (same for all)
+            layer_idx: Layer to inject at (same for all)
+            alpha: Injection strength (same for all)
+            temperature: Sampling temperature
+            max_new_tokens: Maximum tokens to generate
+
+        Returns:
+            List of generated texts
+        """
+        # Tokenize batch with padding
+        inputs = self.tokenizer(
+            prompts,
+            padding=True,
+            return_tensors='pt',
+            truncation=True,
+            max_length=2048
+        ).to(self.device)
+
+        # Setup injection if provided
+        injector = None
+        if concept_vector is not None and layer_idx is not None:
+            injector = ResidualInjector(
+                self.model,
+                concept_vector.cpu().numpy(),
+                layer_idx,
+                alpha=alpha
+            )
+            injector.enable()
+
+        try:
+            # Generate
+            with torch.no_grad():
+                outputs = self.model.generate(
+                    **inputs,
+                    max_new_tokens=max_new_tokens,
+                    temperature=temperature,
+                    do_sample=temperature > 0,
+                    pad_token_id=self.tokenizer.pad_token_id
+                )
+
+            # Decode all outputs
+            generated_texts = []
+            for i in range(len(prompts)):
+                # Find where the input ends for this sample
+                # (need to handle variable length inputs due to padding)
+                input_ids = inputs['input_ids'][i]
+                # Find first pad token or use full length
+                pad_mask = input_ids == self.tokenizer.pad_token_id
+                if pad_mask.any():
+                    input_length = pad_mask.nonzero()[0].item()
+                else:
+                    input_length = len(input_ids)
+
+                # Decode only the generated part
+                generated_tokens = outputs[i][input_length:]
+                generated_text = self.tokenizer.decode(
+                    generated_tokens,
+                    skip_special_tokens=True
+                )
+                generated_texts.append(generated_text)
+
+            return generated_texts
+
+        finally:
+            # Clean up injection
+            if injector is not None:
+                injector.disable()
+
     def run_single_trial(
         self,
         task_data: Dict,
@@ -343,10 +428,11 @@ class IntrospectionExperiment:
         alphas: List[float],
         vector_dir: Path,
         output_path: Path,
-        n_trials_per_condition: Optional[int] = None
+        n_trials_per_condition: Optional[int] = None,
+        batch_size: int = None
     ):
         """
-        Run full experiment across conditions.
+        Run full experiment across conditions with batched generation.
 
         Args:
             task_dataset: List of task data dicts
@@ -357,58 +443,176 @@ class IntrospectionExperiment:
             vector_dir: Directory containing concept vectors
             output_path: Path to save results
             n_trials_per_condition: Max trials per condition (None = all)
+            batch_size: Batch size for generation (None = use config or 1)
         """
         # Limit trials if specified
         if n_trials_per_condition is not None:
             task_dataset = task_dataset[:n_trials_per_condition]
 
-        # Count total trials
-        total_trials = len(task_dataset) * len(conditions) * len(concepts) * len(layers) * len(alphas)
+        # Get batch size from config if not specified
+        if batch_size is None:
+            batch_size = self.config.get('evaluation', {}).get('parallel', {}).get('batch_size', 1)
 
-        print(f"\nRunning {total_trials} trials:")
+        # Count total trials (accounting for skipped non-injection conditions)
+        total_trials = 0
+        for _ in task_dataset:
+            for condition in conditions:
+                for _ in concepts:
+                    for layer in layers:
+                        for alpha in alphas:
+                            if not self.config['conditions'][condition]['inject']:
+                                if alpha != 0.0 or layer != layers[0]:
+                                    continue
+                            total_trials += 1
+
+        print(f"\nRunning {total_trials} trials with batch_size={batch_size}:")
         print(f"  Tasks: {len(task_dataset)}")
         print(f"  Conditions: {conditions}")
         print(f"  Concepts: {concepts}")
         print(f"  Layers: {layers}")
         print(f"  Alphas: {alphas}")
+        if batch_size > 1:
+            print(f"  Estimated speedup: {batch_size}x")
+            print(f"  Estimated time: {total_trials * 7 / batch_size / 60:.1f} minutes (vs {total_trials * 7 / 60:.1f} minutes)")
 
         # Prepare output file
         output_path.parent.mkdir(parents=True, exist_ok=True)
 
-        # Run trials
+        # Reorganize trials by (condition, concept, layer, alpha) for batching
+        # This groups trials with the same injection parameters together
+        trial_groups = {}
+        for condition in conditions:
+            for concept in concepts:
+                for layer in layers:
+                    for alpha in alphas:
+                        # Skip injection params for non-injection conditions
+                        if not self.config['conditions'][condition]['inject']:
+                            if alpha != 0.0 or layer != layers[0]:
+                                continue
+
+                        key = (condition, concept, layer, alpha)
+                        trial_groups[key] = []
+
+                        for task_data in task_dataset:
+                            trial_groups[key].append(task_data)
+
+        # Run trials in batches
         with open(output_path, 'w') as f:
             pbar = tqdm(total=total_trials, desc="Running trials")
 
-            for task_data in task_dataset:
-                for condition in conditions:
-                    for concept in concepts:
-                        for layer in layers:
-                            for alpha in alphas:
-                                # Skip injection params for non-injection conditions
-                                if not self.config['conditions'][condition]['inject']:
-                                    if alpha != 0.0 or layer != layers[0]:
-                                        continue
+            for (condition, concept, layer, alpha), task_list in trial_groups.items():
+                # Load concept vector once per group
+                condition_config = self.config['conditions'][condition]
+                concept_vector = None
 
-                                try:
-                                    result = self.run_single_trial(
-                                        task_data,
-                                        condition,
-                                        concept,
-                                        layer,
-                                        alpha,
-                                        vector_dir
-                                    )
+                if condition_config['inject']:
+                    vector_path = vector_dir / concept / f'layer_{layer}.npz'
+                    try:
+                        import numpy as np
+                        data = np.load(vector_path)
+                        concept_vector = torch.tensor(data['vector'])
+                    except Exception as e:
+                        print(f"\nWarning: Could not load vector for {concept} layer {layer}: {e}")
 
-                                    # Write result
-                                    f.write(json.dumps(result) + '\n')
-                                    f.flush()
+                # Process tasks in batches
+                for batch_start in range(0, len(task_list), batch_size):
+                    batch_end = min(batch_start + batch_size, len(task_list))
+                    batch_tasks = task_list[batch_start:batch_end]
 
-                                except Exception as e:
-                                    print(f"\nError in trial: {e}")
-                                    continue
+                    # Prepare prompts for this batch
+                    batch_prompts = []
+                    batch_metadata = []
 
-                                finally:
-                                    pbar.update(1)
+                    for task_data in batch_tasks:
+                        # Get task content
+                        if 'text' in task_data:
+                            task_content = self.prompts_config['neutral_corpus_task'].format(
+                                text=task_data['text']
+                            )
+                        elif 'problem' in task_data:
+                            task_content = self.prompts_config['step_reasoning_task'].format(
+                                problem=task_data['problem']
+                            )
+                        else:
+                            continue
+
+                        # Determine external style
+                        concept_config = self.config['concepts'][concept]
+                        positive_style = concept_config['positive']
+                        negative_style = concept_config['negative']
+
+                        external_style_map = {
+                            'neutral': 'neutral',
+                            'target': positive_style,
+                            'opposite': negative_style
+                        }
+                        external_style = external_style_map[condition_config['external_style']]
+
+                        # Format prompt
+                        prompt = self.format_prompt(
+                            task_content,
+                            external_style,
+                            include_introspection=True,
+                            concept_name=concept
+                        )
+
+                        batch_prompts.append(prompt)
+                        batch_metadata.append({
+                            'task_data': task_data,
+                            'external_style': external_style
+                        })
+
+                    if not batch_prompts:
+                        continue
+
+                    try:
+                        # Generate batch
+                        if len(batch_prompts) == 1 or batch_size == 1:
+                            # Single trial - use original method
+                            outputs = [self.generate_with_injection(
+                                batch_prompts[0],
+                                concept_vector,
+                                layer if condition_config['inject'] else None,
+                                alpha,
+                                temperature=self.config['evaluation']['temperature'],
+                                max_new_tokens=self.config['evaluation']['max_new_tokens']
+                            )]
+                        else:
+                            # Batch generation
+                            outputs = self.generate_batch_with_injection(
+                                batch_prompts,
+                                concept_vector,
+                                layer if condition_config['inject'] else None,
+                                alpha,
+                                temperature=self.config['evaluation']['temperature'],
+                                max_new_tokens=self.config['evaluation']['max_new_tokens']
+                            )
+
+                        # Write results
+                        for i, (output, metadata) in enumerate(zip(outputs, batch_metadata)):
+                            result = {
+                                'task_id': metadata['task_data']['id'],
+                                'condition': condition,
+                                'concept': concept,
+                                'layer': layer,
+                                'alpha': alpha,
+                                'external_style': metadata['external_style'],
+                                'injected': condition_config['inject'],
+                                'prompt': batch_prompts[i],
+                                'output': output,
+                                'task_data': metadata['task_data']
+                            }
+                            f.write(json.dumps(result) + '\n')
+
+                        f.flush()
+
+                    except Exception as e:
+                        print(f"\nError in batch ({condition}, {concept}, layer {layer}, alpha {alpha}): {e}")
+                        import traceback
+                        traceback.print_exc()
+
+                    finally:
+                        pbar.update(len(batch_prompts))
 
             pbar.close()
 
@@ -446,6 +650,8 @@ def main():
                         help='Concepts to test (default: all)')
     parser.add_argument('--n-trials', type=int, default=None,
                         help='Number of trials per condition (default: all)')
+    parser.add_argument('--batch-size', type=int, default=None,
+                        help='Batch size for generation (default: from config, typically 4-8)')
 
     args = parser.parse_args()
 
@@ -507,7 +713,8 @@ def main():
         alphas,
         Path(args.vector_dir),
         output_path,
-        n_trials
+        n_trials,
+        batch_size=args.batch_size
     )
 
 
