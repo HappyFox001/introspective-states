@@ -72,7 +72,7 @@ CUDA_VISIBLE_DEVICES=0,1,2,3 nohup python eval/run_conditions.py \
   --conditions C0 C1 C2 C3 C4 \
   --concepts formal_neutral \
   --n-trials 100 \
-  --batch-size 8 \
+  --batch-size 32 \
   > logs/neutral_corpus.log 2>&1 &
 
 tail -f logs/neutral_corpus.log
